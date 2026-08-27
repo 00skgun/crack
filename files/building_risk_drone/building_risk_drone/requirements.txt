@@ -1,0 +1,10 @@
+opencv-python>=4.8
+numpy>=1.24
+pyyaml>=6.0
+Pillow>=10.0     # 한글 오버레이 텍스트 렌더링용 (cv2.putText는 한글 미지원)
+
+# 아래는 선택 사항입니다 (YOLO 기반 딥러닝 탐지를 함께 쓰고 싶을 때만 설치)
+# ultralytics>=8.2
+
+# 라즈베리파이 공식 카메라 모듈(CSI)을 쓸 경우 (라즈베리파이 OS에서 apt로 설치 권장)
+# sudo apt install -y python3-picamera2
