@@ -27,7 +27,7 @@ FP16은 모델 파일과 가중치 저장 공간을 줄이는 데 사용하고, 
 
 ```bash
 sudo apt update
-sudo apt install -y python3-venv python3-opencv python3-picamera2
+sudo apt install -y python3-venv python3-opencv python3-picamera2 python3-gpiozero
 
 cd crack/esw_seg_model/esw_seg_model/esw_seg_model/src
 python3 -m venv --system-site-packages .venv-ncnn
@@ -55,6 +55,29 @@ USB 웹캠:
 ```bash
 python webcam_crack_ncnn.py --camera-backend opencv --camera 0
 ```
+
+## 펌프 연동 메인
+
+실제 GPIO를 사용하기 전에 dry-run으로 감지 조건을 확인합니다.
+
+```bash
+python crack_pump_main.py --camera-backend picamera2 --dry-run
+```
+
+기존 모터 드라이버 IN3=BCM17, IN4=BCM27 배선으로 실행:
+
+```bash
+python crack_pump_main.py --camera-backend picamera2 \
+  --pump-in3-pin 17 --pump-in4-pin 27 \
+  --min-crack-area-percent 3.0 --confirm-frames 3 --pump-seconds 2.0
+```
+
+- 3% 이상 균열 영역을 추론 3회 연속 확인해야 작동합니다.
+- 펌프는 2초 후 자동으로 꺼집니다.
+- 같은 균열에는 한 번만 작동하고, 균열이 3회 연속 사라져야 다시 대기 상태가 됩니다.
+- 종료, 예외, 카메라 오류 시 `finally`에서 펌프를 강제로 끕니다.
+
+> 펌프/모터는 GPIO에 직접 연결하지 말고 반드시 모터 드라이버와 별도 전원을 사용하세요.
 
 모니터 없이 처리량을 우선하는 실행:
 

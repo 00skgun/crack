@@ -17,6 +17,7 @@
 | 파일 | 역할 |
 |---|---|
 | `src/webcam_crack_ncnn.py` | Raspberry Pi 4용 실행 진입점. 카메라 캡처, NCNN 추론, 위험도 오버레이 |
+| `src/crack_pump_main.py` | 균열을 연속 확인한 뒤 GPIO 17/27로 펌프를 안전하게 펄스 구동하는 메인 |
 | `src/esw_seg_model_ncnn/esw_seg_model_fp16_160.ncnn.param` | NCNN 모델 그래프 |
 | `src/esw_seg_model_ncnn/esw_seg_model_fp16_160.ncnn.bin` | 실제 실행에 사용하는 FP16 NCNN 가중치 |
 | `src/crack_risk_analysis.py` | 마스크에서 균열별 폭/길이/면적과 등급(A~E)을 계산하는 모듈 |
@@ -33,7 +34,7 @@
 
 ```bash
 sudo apt update
-sudo apt install -y python3-venv python3-opencv python3-picamera2
+sudo apt install -y python3-venv python3-opencv python3-picamera2 python3-gpiozero
 
 cd src
 python3 -m venv --system-site-packages .venv-ncnn
@@ -64,6 +65,32 @@ python webcam_crack_ncnn.py --camera-backend picamera2
 
 기본값 `auto`도 Picamera2를 먼저 선택합니다. USB 웹캠은
 `--camera-backend opencv`를 사용합니다.
+
+### 균열 감지 + 펌프 실행
+
+먼저 GPIO 출력 없이 화면과 감지 조건을 시험합니다.
+
+```bash
+python crack_pump_main.py --camera-backend picamera2 --dry-run
+```
+
+정상 동작을 확인한 다음 실제 펌프를 실행합니다.
+
+```bash
+python crack_pump_main.py --camera-backend picamera2 \
+    --pump-in3-pin 17 \
+    --pump-in4-pin 27 \
+    --min-crack-area-percent 3.0 \
+    --confirm-frames 3 \
+    --pump-seconds 2.0
+```
+
+기본 동작은 균열 면적이 3% 이상인 상태가 추론 3회 연속 확인되면 펌프를 2초간
+한 번 구동하는 방식입니다. 같은 균열이 계속 보일 때 반복 구동하지 않으며, 균열이
+3회 연속 사라진 후에만 다음 작동을 대기합니다.
+
+> 펌프나 모터를 GPIO에 직접 연결하지 마세요. 반드시 별도 전원과 모터 드라이버를
+> 사용하고 Raspberry Pi와 드라이버의 GND를 공통으로 연결하세요. GPIO 번호는 BCM 기준입니다.
 
 ### 옵션을 활용한 실행 예시
 

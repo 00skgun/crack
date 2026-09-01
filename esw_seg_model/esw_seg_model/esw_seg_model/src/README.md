@@ -11,7 +11,7 @@
 
 ```bash
 sudo apt update
-sudo apt install -y python3-venv python3-opencv python3-picamera2
+sudo apt install -y python3-venv python3-opencv python3-picamera2 python3-gpiozero
 python3 -m venv --system-site-packages .venv-ncnn
 source .venv-ncnn/bin/activate
 python -m pip install --upgrade pip
@@ -37,6 +37,25 @@ USB 웹캠:
 ```bash
 python webcam_crack_ncnn.py --camera-backend opencv --camera 0
 ```
+
+## 균열 감지 + 펌프 메인
+
+GPIO를 움직이지 않는 사전 시험:
+
+```bash
+python crack_pump_main.py --camera-backend picamera2 --dry-run
+```
+
+실제 실행(BCM GPIO 17/27, 3% 이상 3회 연속 감지 시 2초 구동):
+
+```bash
+python crack_pump_main.py --camera-backend picamera2 \
+    --pump-in3-pin 17 --pump-in4-pin 27 \
+    --min-crack-area-percent 3.0 --confirm-frames 3 --pump-seconds 2.0
+```
+
+펌프는 GPIO에 직접 연결하지 말고 기존 모터 드라이버의 IN3/IN4에 연결하세요.
+프로그램이 종료되거나 오류가 발생하면 두 GPIO를 모두 OFF로 전환합니다.
 
 처리 주기를 가장 빠르게 설정:
 
