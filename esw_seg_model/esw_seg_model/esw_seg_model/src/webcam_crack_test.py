@@ -22,8 +22,12 @@ webcam_crack_test.py (risk-aware version)
 분리되어 있음 (각 파일 상단 docstring에 설계 배경 설명).
 
 사용법:
-    python webcam_crack_test.py --model seg_model.pth
+    # 라즈베리파이 저부하 기본값: 320x240, 5 FPS, 입력 160, 3프레임마다 추론
+    libcamerify python webcam_crack_test.py --model esw_seg_model_best.pt
+
+    # 정확도 우선 설정
     python webcam_crack_test.py --model seg_model.pth --camera 0 --img-size 256 \
+        --cap-width 640 --cap-height 480 --cap-fps 10 --process-every 1 \
         --zone "3F_복도" --state-file building_risk_state.json \
         --log-file log.txt --mm-per-pixel 0.35
 
@@ -35,7 +39,9 @@ webcam_crack_test.py (risk-aware version)
 """
 
 import argparse
+import gc
 import logging
+import os
 import time
 import uuid
 from datetime import datetime
@@ -85,23 +91,35 @@ def build_model(num_classes: int = 1) -> torch.nn.Module:
 
 def load_model(weights_path: str, device: torch.device, logger: logging.Logger) -> torch.nn.Module:
     model = build_model(num_classes=1)
-    state_dict = torch.load(weights_path, map_location=device)
 
-    if isinstance(state_dict, dict) and "model" in state_dict:
-        state_dict = state_dict["model"]
-    elif isinstance(state_dict, dict) and "state_dict" in state_dict:
-        state_dict = state_dict["state_dict"]
+    try:
+        checkpoint = torch.load(weights_path, map_location="cpu", weights_only=True)
+    except TypeError:
+        # weights_only를 지원하지 않는 구버전 PyTorch 호환
+        checkpoint = torch.load(weights_path, map_location="cpu")
+
+    state_dict = checkpoint
+    if isinstance(checkpoint, dict) and "model" in checkpoint:
+        state_dict = checkpoint["model"]
+    elif isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+        state_dict = checkpoint["state_dict"]
 
     missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+    if missing_keys:
+        logger.warning(f"Missing model keys: {missing_keys}")
     if unexpected_keys:
         logger.info(f"Ignored unexpected keys (e.g. aux_classifier): {unexpected_keys}")
+
+    del state_dict
+    del checkpoint
+    gc.collect()
 
     model.to(device)
     model.eval()
     return model
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def predict_mask(model, frame_bgr, img_size, device):
     """웹캠 프레임(BGR, HxWx3) -> 정규화된 grayscale 예측 마스크(0~255, img_size x img_size)"""
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -184,9 +202,24 @@ def main():
     parser = argparse.ArgumentParser(description="Webcam crack segmentation + risk assessment")
     parser.add_argument("--model", type=str, default="esw_seg_model_best.pt", help="학습된 모델(.pt) 경로")
     parser.add_argument("--camera", type=int, default=0, help="웹캠 장치 인덱스")
-    parser.add_argument("--img-size", type=int, default=256, help="모델 입력 크기 (학습 때와 동일하게)")
+    parser.add_argument("--cap-width", type=int, default=320, help="카메라 캡처 너비")
+    parser.add_argument("--cap-height", type=int, default=240, help="카메라 캡처 높이")
+    parser.add_argument("--cap-fps", type=int, default=5, help="카메라 캡처 FPS 제한")
+    parser.add_argument("--img-size", type=int, default=160, help="모델 입력 크기")
+    parser.add_argument(
+        "--process-every",
+        type=int,
+        default=3,
+        help="N 프레임마다 모델 추론 실행 (사이 프레임은 직전 결과 재사용)",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=max(1, min(4, os.cpu_count() or 1)),
+        help="PyTorch CPU 연산 스레드 수",
+    )
     parser.add_argument("--threshold", type=int, default=127, help="초기 threshold 값 (0~255)")
-    parser.add_argument("--display-width", type=int, default=800, help="표시 창의 너비(px)")
+    parser.add_argument("--display-width", type=int, default=640, help="표시 창의 너비(px)")
     parser.add_argument("--cpu", action="store_true", help="GPU가 있어도 강제로 CPU 사용")
     parser.add_argument("--zone", type=str, default="unspecified", help="현재 촬영 중인 구역/방 이름")
     parser.add_argument("--state-file", type=str, default="building_risk_state.json",
@@ -200,10 +233,25 @@ def main():
                          help="새로 확정된 균열이 없어도 현재 위험도를 로그에 남기는 주기(초)")
     args = parser.parse_args()
 
+    if args.process_every < 1:
+        parser.error("--process-every는 1 이상이어야 합니다.")
+    if args.threads < 1:
+        parser.error("--threads는 1 이상이어야 합니다.")
+
     logger = setup_logger(args.log_file)
 
     device = torch.device("cuda" if (torch.cuda.is_available() and not args.cpu) else "cpu")
     logger.info(f"Using device: {device}")
+
+    if device.type == "cpu":
+        torch.set_num_threads(args.threads)
+        try:
+            torch.set_num_interop_threads(1)
+        except RuntimeError:
+            # 이미 병렬 연산이 시작된 환경에서는 interop 스레드 변경 불가
+            pass
+        cv2.setNumThreads(1)
+        logger.info(f"CPU optimization: torch_threads={args.threads}, opencv_threads=1")
 
     logger.info(f"Loading model from: {args.model}")
     model = load_model(args.model, device, logger)
@@ -212,6 +260,19 @@ def main():
     cap = cv2.VideoCapture(args.camera)
     if not cap.isOpened():
         raise RuntimeError(f"카메라를 열 수 없습니다 (index={args.camera}). 다른 인덱스를 시도해보세요.")
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.cap_width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.cap_height)
+    cap.set(cv2.CAP_PROP_FPS, args.cap_fps)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    actual_w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+    actual_h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    actual_fps = cap.get(cv2.CAP_PROP_FPS)
+    logger.info(
+        f"Camera initialized: {actual_w:.0f}x{actual_h:.0f} @ {actual_fps:.1f} FPS | "
+        f"model_input={args.img_size} process_every={args.process_every}"
+    )
 
     window_name = "Crack Segmentation - Risk-aware Webcam Test"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
@@ -231,6 +292,10 @@ def main():
     prev_time = time.time()
     fps = 0.0
     last_log_time = 0.0
+    frame_index = 0
+    binary_mask = None
+    frame_result = None
+    inference_ms = 0.0
 
     print("[INFO] 's': 캡처저장 / 'z': 구역(zone) 변경 / 'b': 건물 위험도 요약 출력 / 'q': 종료")
 
@@ -243,25 +308,31 @@ def main():
 
             h, w = frame.shape[:2]
 
-            mask_norm = predict_mask(model, frame, args.img_size, device)
-            mask_resized = cv2.resize(mask_norm, (w, h), interpolation=cv2.INTER_LINEAR)
+            should_process = frame_index % args.process_every == 0
+            if should_process:
+                inference_started = time.perf_counter()
+                mask_norm = predict_mask(model, frame, args.img_size, device)
+                inference_ms = (time.perf_counter() - inference_started) * 1000.0
 
-            thresh_val = cv2.getTrackbarPos("Threshold", window_name)
-            _, binary_mask = cv2.threshold(mask_resized, thresh_val, 255, cv2.THRESH_BINARY)
-            binary_mask = binary_mask.astype(np.uint8)
+                mask_resized = cv2.resize(mask_norm, (w, h), interpolation=cv2.INTER_LINEAR)
+                thresh_val = cv2.getTrackbarPos("Threshold", window_name)
+                _, binary_mask = cv2.threshold(mask_resized, thresh_val, 255, cv2.THRESH_BINARY)
+                binary_mask = binary_mask.astype(np.uint8)
 
-            # --- 위험도 분석 ---
-            frame_result = analyze_mask(binary_mask, mm_per_pixel=args.mm_per_pixel)
-            newly_confirmed = frame_tracker.update(frame_result["cracks"])
-            for crack in newly_confirmed:
-                building_state.record_confirmed_crack(current_zone, crack, session_id)
-                logger.info(
-                    f"Confirmed crack | zone={current_zone} track_id={crack['track_id']} "
-                    f"score={crack['score']} grade={crack['grade']} "
-                    f"width_mm={crack.get('width_mm')} width_px={crack['width_px']:.2f}"
-                )
-            if newly_confirmed:
-                building_state.recompute_overall()
+                # 추적 확인 횟수는 실제 모델 추론 프레임만 기준으로 계산한다.
+                frame_result = analyze_mask(binary_mask, mm_per_pixel=args.mm_per_pixel)
+                newly_confirmed = frame_tracker.update(frame_result["cracks"])
+                for crack in newly_confirmed:
+                    building_state.record_confirmed_crack(current_zone, crack, session_id)
+                    logger.info(
+                        f"Confirmed crack | zone={current_zone} track_id={crack['track_id']} "
+                        f"score={crack['score']} grade={crack['grade']} "
+                        f"width_mm={crack.get('width_mm')} width_px={crack['width_px']:.2f}"
+                    )
+                if newly_confirmed:
+                    building_state.recompute_overall()
+
+            frame_index += 1
 
             # 화면에는 원본 + 마스킹 오버레이만 표시 (마스크 단독 패널은 표시하지 않음)
             overlay_bgr = make_overlay(frame, binary_mask)
@@ -279,6 +350,7 @@ def main():
                 logger.info(
                     f"Snapshot | zone={current_zone} frame_score={frame_result['frame_score']:.1f} "
                     f"frame_grade={frame_result['frame_grade']} cracks={frame_result['num_cracks']} "
+                    f"inference={inference_ms:.0f}ms "
                     f"zone_max={zone_max}({zone_grade}) "
                     f"building_overall={building_state.data['overall_score']}"
                     f"({building_state.data['overall_grade']})"
