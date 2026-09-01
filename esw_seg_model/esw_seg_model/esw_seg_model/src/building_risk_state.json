@@ -1,0 +1,132 @@
+{
+  "building_id": "default",
+  "created_at": 1787548715.891395,
+  "last_updated": 1788243289.8625808,
+  "zones": {
+    "unspecified": {
+      "max_score_ever": 100.0,
+      "max_grade_ever": "E",
+      "max_width_mm_ever": null,
+      "confirmed_crack_count_total": 279,
+      "sessions": [
+        {
+          "session_id": "20260824_141835_ee8509",
+          "ts": 1787548758.3089643,
+          "num_confirmed": 17,
+          "max_score": 100.0,
+          "max_width_mm": null
+        },
+        {
+          "session_id": "20260824_142409_978c64",
+          "ts": 1787549150.297625,
+          "num_confirmed": 66,
+          "max_score": 100.0,
+          "max_width_mm": null
+        },
+        {
+          "session_id": "20260824_143004_e11a15",
+          "ts": 1787549423.1461506,
+          "num_confirmed": 4,
+          "max_score": 100.0,
+          "max_width_mm": null
+        },
+        {
+          "session_id": "20260824_143518_c4c31f",
+          "ts": 1787549820.5364225,
+          "num_confirmed": 44,
+          "max_score": 100.0,
+          "max_width_mm": null
+        },
+        {
+          "session_id": "20260824_144137_bc399b",
+          "ts": 1787550154.0744536,
+          "num_confirmed": 53,
+          "max_score": 100.0,
+          "max_width_mm": null
+        },
+        {
+          "session_id": "20260824_144554_06c4de",
+          "ts": 1787550527.5355375,
+          "num_confirmed": 70,
+          "max_score": 100.0,
+          "max_width_mm": null
+        },
+        {
+          "session_id": "20260824_145024_e25a00",
+          "ts": 1787550681.8580685,
+          "num_confirmed": 8,
+          "max_score": 100.0,
+          "max_width_mm": null
+        },
+        {
+          "session_id": "20260901_151426_ac6984",
+          "ts": 1788243289.862464,
+          "num_confirmed": 17,
+          "max_score": 100.0,
+          "max_width_mm": null
+        }
+      ],
+      "growth_flag": false
+    }
+  },
+  "history_log": [
+    {
+      "session_id": "20260824_141835_ee8509",
+      "ts": 1787548758.3090012,
+      "zones_touched": [
+        "unspecified"
+      ]
+    },
+    {
+      "session_id": "20260824_142409_978c64",
+      "ts": 1787549150.2976778,
+      "zones_touched": [
+        "unspecified"
+      ]
+    },
+    {
+      "session_id": "20260824_143004_e11a15",
+      "ts": 1787549423.1461859,
+      "zones_touched": [
+        "unspecified"
+      ]
+    },
+    {
+      "session_id": "20260824_143518_c4c31f",
+      "ts": 1787549820.5365095,
+      "zones_touched": [
+        "unspecified"
+      ]
+    },
+    {
+      "session_id": "20260824_144137_bc399b",
+      "ts": 1787550154.0744998,
+      "zones_touched": [
+        "unspecified"
+      ]
+    },
+    {
+      "session_id": "20260824_144554_06c4de",
+      "ts": 1787550527.535572,
+      "zones_touched": [
+        "unspecified"
+      ]
+    },
+    {
+      "session_id": "20260824_145024_e25a00",
+      "ts": 1787550681.858116,
+      "zones_touched": [
+        "unspecified"
+      ]
+    },
+    {
+      "session_id": "20260901_151426_ac6984",
+      "ts": 1788243289.8625116,
+      "zones_touched": [
+        "unspecified"
+      ]
+    }
+  ],
+  "overall_score": 90.0,
+  "overall_grade": "E"
+}
