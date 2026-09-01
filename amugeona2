@@ -1,0 +1,97 @@
+import cv2
+import numpy as np
+import ncnn
+import time
+from gpiozero import DigitalOutputDevice
+
+# ==========================================
+# ==========================================
+in3 = DigitalOutputDevice(17)
+in4 = DigitalOutputDevice(27)
+
+def pump_on():
+    in3.on()
+    in4.off()
+
+def pump_off():
+    in3.off()
+    in4.off()
+
+pump_off()
+
+# ==========================================
+# ==========================================
+net = ncnn.Net()
+
+
+# net.opt.use_vulkan_compute = True 
+
+net.load_param("crackseg.ncnn.param")
+net.load_model("crackseg.ncnn.bin")
+
+# ==========================================
+# ==========================================
+
+# ==========================================
+# ==========================================
+cap = cv2.VideoCapture(0) 
+
+if not cap.isOpened():
+    print("[error] cannot open camera.")
+    exit()
+
+print("[*] system on...")
+
+try:
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        img_resized = cv2.resize(frame, (256, 256))
+        
+        mat_in = ncnn.Mat.from_pixels(img_resized, ncnn.Mat.PixelType.PIXEL_BGR2RGB, 256, 256)
+        
+        
+        mean_vals = [0.0, 0.0, 0.0]
+        norm_vals = [1/255.0, 1/255.0, 1/255.0]
+        mat_in.substract_mean_normalize(mean_vals, norm_vals)
+        
+        ex = net.create_extractor()
+              ex.input("in0", mat_in)
+        ret, mat_out = ex.extract("out0")
+        
+                out_array = np.array(mat_out).reshape(256, 256)
+        
+        crack_mask = out_array > 0.5 
+        
+      
+        crack_pixels = np.sum(crack_mask)
+        total_pixels = 256 * 256
+        crack_ratio = (crack_pixels / total_pixels) * 100.0
+        
+        
+        if crack_ratio >= CRACK_RISK_THRESHOLD:
+            print(f"[DANGER!] crack: {crack_ratio:.2f}% -> pump on!")
+            pump_on()
+        else:
+            print(f"[normal] crack: {crack_ratio:.2f}% -> pump waiting")
+            pump_off()
+            
+        # optional: cam show
+        # crack_overlay = (crack_mask * 255).astype(np.uint8)
+        # cv2.imshow('Crack Mask', crack_overlay)
+        # if cv2.waitKey(1) & 0xFF == ord('q'):
+        #     break
+        
+        time.sleep(0.1)
+
+except KeyboardInterrupt:
+    print("\n[*] Exit.")
+
+finally:
+   
+    pump_off()
+    cap.release()
+    cv2.destroyAllWindows()
+    print("[*] Pump off.")
