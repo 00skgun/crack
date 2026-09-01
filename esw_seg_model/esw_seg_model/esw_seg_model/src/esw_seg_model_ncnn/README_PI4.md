@@ -27,7 +27,7 @@ FP16은 모델 파일과 가중치 저장 공간을 줄이는 데 사용하고, 
 
 ```bash
 sudo apt update
-sudo apt install -y python3-venv python3-opencv
+sudo apt install -y python3-venv python3-opencv python3-picamera2
 
 cd crack/esw_seg_model/esw_seg_model/esw_seg_model/src
 python3 -m venv --system-site-packages .venv-ncnn
@@ -38,16 +38,22 @@ python -m pip install -r requirements_ncnn_pi4.txt
 
 ## 실행
 
-USB 카메라:
+CSI 리본 케이블 카메라:
+
+```bash
+python webcam_crack_ncnn.py --camera-backend picamera2 --zone "1F_로비"
+```
+
+기본값 `auto`도 CSI 카메라에서는 Picamera2를 먼저 사용합니다.
 
 ```bash
 python webcam_crack_ncnn.py --zone "1F_로비"
 ```
 
-`libcamerify`가 필요한 CSI 카메라 환경:
+USB 웹캠:
 
 ```bash
-libcamerify python webcam_crack_ncnn.py --zone "1F_로비"
+python webcam_crack_ncnn.py --camera-backend opencv --camera 0
 ```
 
 모니터 없이 처리량을 우선하는 실행:
@@ -78,7 +84,7 @@ ROI는 모델 입력 연산량 자체를 더 줄이지는 않지만, 같은 160�
 - NCNN 스레드: 최대 4개
 - OpenCV 스레드: 1개
 - NCNN light mode 및 packing layout 활성화
-- 카메라 버퍼: 1프레임
+- Picamera2 버퍼: 2프레임, OpenCV 버퍼: 1프레임
 
 `--process-every 1`은 탐지 갱신 주기를 가장 빠르게 하지만 DeepLabV3-ResNet101
 자체가 무거워 Pi 4에서 수십 FPS는 기대할 수 없습니다. 실제 목표는 지연을 줄인

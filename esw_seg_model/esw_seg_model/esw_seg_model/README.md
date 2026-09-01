@@ -33,7 +33,7 @@
 
 ```bash
 sudo apt update
-sudo apt install -y python3-venv python3-opencv
+sudo apt install -y python3-venv python3-opencv python3-picamera2
 
 cd src
 python3 -m venv --system-site-packages .venv-ncnn
@@ -56,11 +56,14 @@ cd src
 python webcam_crack_ncnn.py
 ```
 
-CSI 카메라에서 `libcamerify`가 필요한 환경이라면 다음처럼 실행합니다.
+CSI 리본 케이블 카메라를 명시적으로 선택하려면 다음처럼 실행합니다.
 
 ```bash
-libcamerify python webcam_crack_ncnn.py
+python webcam_crack_ncnn.py --camera-backend picamera2
 ```
+
+기본값 `auto`도 Picamera2를 먼저 선택합니다. USB 웹캠은
+`--camera-backend opencv`를 사용합니다.
 
 ### 옵션을 활용한 실행 예시
 
@@ -83,7 +86,8 @@ python webcam_crack_ncnn.py \
 |---|---|---|
 | `--param` | `esw_seg_model_ncnn/esw_seg_model_fp16_160.ncnn.param` | NCNN 모델 그래프 경로 |
 | `--bin` | `esw_seg_model_ncnn/esw_seg_model_fp16_160.ncnn.bin` | FP16 NCNN 가중치 경로 |
-| `--camera` | `0` | 웹캠 장치 인덱스 (연결된 카메라가 여러 개면 0,1,2... 시도) |
+| `--camera-backend` | `auto` | `auto`, CSI용 `picamera2`, USB용 `opencv` 중 선택 |
+| `--camera` | `0` | 카메라 인덱스 (여러 개면 0,1,2... 시도) |
 | `--cap-width` | `320` | 카메라 캡처 너비(px) |
 | `--cap-height` | `240` | 카메라 캡처 높이(px) |
 | `--cap-fps` | `5` | 카메라 요청 FPS |
@@ -212,7 +216,8 @@ WIDTH_GRADE_MAX = ("E", 100)
 
 | 증상 | 원인/해결 |
 |---|---|
-| `카메라를 열 수 없습니다` 에러 | `--camera` 인덱스를 0,1,2로 바꿔가며 시도. 다른 프로그램이 웹캠을 점유 중인지 확인 |
+| CSI 카메라에서 프레임을 읽지 못함 | `rpicam-hello`로 카메라를 확인하고 `sudo apt install -y python3-picamera2` 실행 후 `--camera-backend picamera2` 사용 |
+| USB 카메라를 열 수 없음 | `--camera-backend opencv`와 `--camera` 인덱스 0,1,2를 시도. 다른 프로그램의 카메라 점유 여부 확인 |
 | NCNN 모델을 열 수 없음 | `.ncnn.param`과 `.ncnn.bin`이 모두 `src/esw_seg_model_ncnn/`에 있는지 확인. Git LFS로 받은 `.bin`이 포인터 파일이면 `git lfs pull` 실행 |
 | 균열 폭 측정이 부정확함 | `scikit-image` 설치 여부 확인(`pip install scikit-image`) — 미설치 시 근사값 사용됨. 그래도 부정확하면 `--mm-per-pixel` 보정 여부 확인 |
 | 위험도가 매 프레임 계속 올라감 | `--state-file`은 "구역의 최댓값"을 저장하는 것이라 이미 최댓값을 넘지 않는 한 더 오르지 않음. 계속 오른다면 실제로 더 큰/새로운 균열이 잡히고 있는 것 |

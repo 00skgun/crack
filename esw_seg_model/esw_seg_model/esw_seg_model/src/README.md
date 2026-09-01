@@ -11,7 +11,7 @@
 
 ```bash
 sudo apt update
-sudo apt install -y python3-venv python3-opencv
+sudo apt install -y python3-venv python3-opencv python3-picamera2
 python3 -m venv --system-site-packages .venv-ncnn
 source .venv-ncnn/bin/activate
 python -m pip install --upgrade pip
@@ -20,16 +20,22 @@ python -m pip install -r requirements_ncnn_pi4.txt
 
 ## 기본 실행
 
-USB 카메라:
+CSI 리본 케이블 카메라:
+
+```bash
+python webcam_crack_ncnn.py --camera-backend picamera2
+```
+
+기본값 `auto`도 Picamera2를 먼저 선택하므로 다음 명령도 같습니다.
 
 ```bash
 python webcam_crack_ncnn.py
 ```
 
-`libcamerify`가 필요한 CSI 카메라:
+USB 웹캠:
 
 ```bash
-libcamerify python webcam_crack_ncnn.py
+python webcam_crack_ncnn.py --camera-backend opencv --camera 0
 ```
 
 처리 주기를 가장 빠르게 설정:

@@ -45,6 +45,106 @@ def setup_logger(log_file: str) -> logging.Logger:
     return logger
 
 
+class OpenCVCamera:
+    """USB/V4L2 camera adapter with the same interface as Picamera2Camera."""
+
+    def __init__(self, index: int, width: int, height: int, fps: int) -> None:
+        self.capture = cv2.VideoCapture(index)
+        if not self.capture.isOpened():
+            raise RuntimeError(f"OpenCV 카메라를 열 수 없습니다: index={index}")
+        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        self.capture.set(cv2.CAP_PROP_FPS, fps)
+        self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.description = (
+            f"opencv index={index} "
+            f"{self.capture.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x"
+            f"{self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f} @ "
+            f"{self.capture.get(cv2.CAP_PROP_FPS):.1f} FPS"
+        )
+
+    def read(self) -> tuple[bool, np.ndarray | None]:
+        return self.capture.read()
+
+    def release(self) -> None:
+        self.capture.release()
+
+
+class Picamera2Camera:
+    """Raspberry Pi CSI camera adapter using the supported libcamera stack."""
+
+    def __init__(self, index: int, width: int, height: int, fps: int) -> None:
+        try:
+            from picamera2 import Picamera2
+        except ImportError as exc:
+            raise RuntimeError(
+                "Picamera2가 없습니다. "
+                "sudo apt install -y python3-picamera2 후 "
+                "--system-site-packages 가상환경을 사용하세요."
+            ) from exc
+
+        self.camera = Picamera2(index)
+        configuration = self.camera.create_video_configuration(
+            main={"format": "RGB888", "size": (width, height)},
+            controls={"FrameRate": float(fps)},
+            buffer_count=2,
+        )
+        self.camera.configure(configuration)
+        self.camera.start()
+        # 자동 노출과 화이트 밸런스가 첫 프레임 전에 안정화될 시간을 준다.
+        time.sleep(0.5)
+        stream = self.camera.stream_configuration("main")
+        actual_width, actual_height = stream["size"]
+        self.description = (
+            f"picamera2 index={index} {actual_width}x{actual_height} @ {fps} FPS"
+        )
+
+    def read(self) -> tuple[bool, np.ndarray | None]:
+        try:
+            # Picamera2의 RGB888 배열은 OpenCV가 바로 처리할 수 있는 3채널 배열이다.
+            frame = self.camera.capture_array("main")
+        except Exception:
+            return False, None
+        if frame is None or frame.size == 0:
+            return False, None
+        return True, np.ascontiguousarray(frame)
+
+    def release(self) -> None:
+        try:
+            self.camera.stop()
+        finally:
+            self.camera.close()
+
+
+def open_camera(
+    backend: str,
+    index: int,
+    width: int,
+    height: int,
+    fps: int,
+    logger: logging.Logger,
+) -> OpenCVCamera | Picamera2Camera:
+    if backend == "picamera2":
+        return Picamera2Camera(index, width, height, fps)
+    if backend == "opencv":
+        return OpenCVCamera(index, width, height, fps)
+
+    try:
+        camera = Picamera2Camera(index, width, height, fps)
+        logger.info("CSI 카메라를 Picamera2로 열었습니다")
+        return camera
+    except (RuntimeError, OSError) as picamera_error:
+        logger.info(f"Picamera2를 사용할 수 없어 OpenCV 카메라로 전환: {picamera_error}")
+        try:
+            return OpenCVCamera(index, width, height, fps)
+        except RuntimeError as opencv_error:
+            raise RuntimeError(
+                "카메라 초기화 실패. CSI 카메라는 rpicam-hello로 동작 여부를 확인하고 "
+                "python3-picamera2 설치 여부를 확인하세요. "
+                f"Picamera2: {picamera_error}; OpenCV: {opencv_error}"
+            ) from opencv_error
+
+
 class NcnnSegmenter:
     def __init__(self, param_path: Path, bin_path: Path, threads: int) -> None:
         if not param_path.is_file():
@@ -223,6 +323,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Raspberry Pi 4 NCNN crack monitor")
     parser.add_argument("--param", type=Path, default=DEFAULT_PARAM)
     parser.add_argument("--bin", type=Path, default=DEFAULT_BIN)
+    parser.add_argument(
+        "--camera-backend",
+        choices=("auto", "picamera2", "opencv"),
+        default="auto",
+        help="auto는 CSI Picamera2를 먼저 시도하고 실패하면 OpenCV를 사용합니다",
+    )
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--cap-width", type=int, default=320)
     parser.add_argument("--cap-height", type=int, default=240)
@@ -252,17 +358,16 @@ def main() -> None:
     )
     segmenter = NcnnSegmenter(args.param.resolve(), args.bin.resolve(), args.threads)
 
-    capture = cv2.VideoCapture(args.camera)
-    if not capture.isOpened():
-        raise RuntimeError(f"카메라를 열 수 없습니다: index={args.camera}")
-    capture.set(cv2.CAP_PROP_FRAME_WIDTH, args.cap_width)
-    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, args.cap_height)
-    capture.set(cv2.CAP_PROP_FPS, args.cap_fps)
-    capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    capture = open_camera(
+        args.camera_backend,
+        args.camera,
+        args.cap_width,
+        args.cap_height,
+        args.cap_fps,
+        logger,
+    )
     logger.info(
-        f"Camera: {capture.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x"
-        f"{capture.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f} @ "
-        f"{capture.get(cv2.CAP_PROP_FPS):.1f} FPS | process_every={args.process_every}"
+        f"Camera: {capture.description} | process_every={args.process_every}"
     )
 
     window_name = "NCNN Crack Risk Monitor"
@@ -293,8 +398,11 @@ def main() -> None:
     try:
         while True:
             success, frame = capture.read()
-            if not success:
-                logger.warning("프레임을 읽지 못했습니다")
+            if not success or frame is None:
+                logger.error(
+                    "프레임을 읽지 못했습니다. CSI 카메라는 "
+                    "--camera-backend picamera2로 실행하세요."
+                )
                 break
 
             should_process = frame_index % args.process_every == 0
