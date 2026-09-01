@@ -1,6 +1,6 @@
-# Webcam Crack Segmentation + 건물 위험도 평가
+# Raspberry Pi 4 NCNN Crack Segmentation + 건물 위험도 평가
 
-웹캠 영상에 학습된 crack segmentation 모델을 실시간으로 적용해서
+웹캠 영상에 NCNN으로 변환·최적화한 crack segmentation 모델을 적용해서
 1) 균열을 화면에 마스킹하고
 2) 균열의 폭/길이/면적을 측정해 위험도(A~E 등급)를 계산하고
 3) 건물을 돌아다니며(여러 구역/여러 세션) 탐색한 결과를 파일에 누적해서
@@ -16,29 +16,34 @@
 
 | 파일 | 역할 |
 |---|---|
-| `webcam_crack_test.py` | 실행 진입점. 웹캠 캡처, 모델 추론, 화면 표시(3분할 패널 + 위험도 오버레이) |
-| `crack_risk_analysis.py` | 한 프레임의 마스크에서 균열별 폭/길이/면적을 측정하고 등급(A~E)을 매기는 모듈 |
-| `building_risk_tracker.py` | 프레임간 동일 균열 중복 방지 추적 + 구역/건물 위험도를 파일에 영속 저장·누적하는 모듈 |
-| `requirements.txt` | 필요한 python 패키지 목록 |
-| `log.txt` | (실행하면 자동 생성) 위험도 산출 로그. `--log-file`로 경로 변경 가능 |
+| `src/webcam_crack_ncnn.py` | Raspberry Pi 4용 실행 진입점. 카메라 캡처, NCNN 추론, 위험도 오버레이 |
+| `src/esw_seg_model_ncnn/esw_seg_model_fp16_160.ncnn.param` | NCNN 모델 그래프 |
+| `src/esw_seg_model_ncnn/esw_seg_model_fp16_160.ncnn.bin` | 실제 실행에 사용하는 FP16 NCNN 가중치 |
+| `src/crack_risk_analysis.py` | 마스크에서 균열별 폭/길이/면적과 등급(A~E)을 계산하는 모듈 |
+| `src/building_risk_tracker.py` | 동일 균열 추적과 구역/건물 위험도 누적 저장 모듈 |
+| `src/requirements_ncnn_pi4.txt` | Raspberry Pi 4 NCNN 실행 패키지 목록 |
+| `src/esw_seg_model_best.pt` | 원본 PyTorch 가중치. 재변환·검증용이며 Pi 실행 시 로드하지 않음 |
 
-세 `.py` 파일은 같은 폴더에 있어야 합니다 (`webcam_crack_test.py`가 나머지 두 개를 import 함).
+> Raspberry Pi에서는 `.pt` 파일이 아니라 `.ncnn.param`과 `.ncnn.bin` 두 파일을 함께 사용합니다.
+> 기본 경로가 실행기에 설정되어 있으므로 별도의 모델 인자를 주지 않아도 됩니다.
 
 ---
 
 ## 2. 설치
 
 ```bash
-# (권장) 가상환경 생성
-python3 -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+sudo apt update
+sudo apt install -y python3-venv python3-opencv
 
-pip install -r requirements.txt
+cd src
+python3 -m venv --system-site-packages .venv-ncnn
+source .venv-ncnn/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements_ncnn_pi4.txt
 ```
 
-- GPU(CUDA)가 있으면 자동으로 사용됩니다. 없어도 CPU로 동작합니다(속도만 느려짐).
-- `scikit-image`는 선택 사항입니다. 설치되어 있으면 skeleton 기반 정밀 측정을,
-  없으면 `minAreaRect` 기반 근사 측정을 자동으로 사용합니다(정확도는 다소 낮음).
+- 추론은 Raspberry Pi 4 CPU에서 NCNN으로 실행됩니다. PyTorch와 CUDA는 필요하지 않습니다.
+- 모델 입력은 변환 시 고정된 `160×160`이며 실행 옵션으로 바꾸지 않습니다.
 
 ---
 
@@ -47,16 +52,26 @@ pip install -r requirements.txt
 ### 기본 실행
 
 ```bash
-python webcam_crack_test.py --model seg_model.pth
+cd src
+python webcam_crack_ncnn.py
+```
+
+CSI 카메라에서 `libcamerify`가 필요한 환경이라면 다음처럼 실행합니다.
+
+```bash
+libcamerify python webcam_crack_ncnn.py
 ```
 
 ### 옵션을 활용한 실행 예시
 
 ```bash
-python webcam_crack_test.py \
-    --model seg_model.pth \
+python webcam_crack_ncnn.py \
     --camera 0 \
-    --img-size 256 \
+    --cap-width 320 \
+    --cap-height 240 \
+    --cap-fps 5 \
+    --process-every 3 \
+    --threads 4 \
     --zone "3F_복도" \
     --state-file building_risk_state.json \
     --mm-per-pixel 0.35
@@ -66,17 +81,23 @@ python webcam_crack_test.py \
 
 | 옵션 | 기본값 | 설명 |
 |---|---|---|
-| `--model` | `esw_seg_model_best.pt` | 학습된 모델 가중치 경로 |
+| `--param` | `esw_seg_model_ncnn/esw_seg_model_fp16_160.ncnn.param` | NCNN 모델 그래프 경로 |
+| `--bin` | `esw_seg_model_ncnn/esw_seg_model_fp16_160.ncnn.bin` | FP16 NCNN 가중치 경로 |
 | `--camera` | `0` | 웹캠 장치 인덱스 (연결된 카메라가 여러 개면 0,1,2... 시도) |
-| `--img-size` | `256` | 모델 입력 해상도 (학습 때와 반드시 동일하게) |
+| `--cap-width` | `320` | 카메라 캡처 너비(px) |
+| `--cap-height` | `240` | 카메라 캡처 높이(px) |
+| `--cap-fps` | `5` | 카메라 요청 FPS |
+| `--process-every` | `3` | 지정한 프레임 수마다 한 번 추론. `1`이면 매 프레임 추론 |
+| `--threads` | 최대 `4` | NCNN 추론 스레드 수 |
 | `--threshold` | `127` | 이진화 임계값 초기값 (실행 중 화면의 트랙바로 실시간 조절 가능) |
-| `--display-width` | `800` | 화면에 표시되는 창의 너비(px). 이제 패널이 1개(원본+마스킹 오버레이)뿐이라 기본값을 키움 |
-| `--cpu` | (off) | GPU가 있어도 강제로 CPU만 사용 |
+| `--display-width` | `640` | 화면에 표시되는 창의 너비(px) |
+| `--roi` | (없음) | 집중 분석 영역을 `x,y,width,height` 형식으로 지정 |
+| `--headless` | (off) | 화면 표시 없이 처리 성능을 우선하는 모드 |
 | `--zone` | `unspecified` | 현재 촬영 중인 구역/방 이름. 실행 중 `z` 키로도 변경 가능 |
 | `--state-file` | `building_risk_state.json` | 건물 위험도 누적 상태를 저장할 파일 경로. **이 파일을 유지해야 실행할 때마다 위험도가 이어서 누적됩니다** |
 | `--mm-per-pixel` | (없음) | 보정값. 있으면 균열 폭을 실제 mm 단위로 계산해서 등급을 매김. 없으면 픽셀 기준 상대 심각도 사용 (4번 항목 참고) |
-| `--log-file` | `log.txt` | 위험도 산출 로그(세션 시작/종료, 확정 균열, 주기적 스냅샷 등)를 저장할 파일 경로 |
-| `--log-interval` | `5.0` | 새로 확정된 균열이 없어도 현재 위험도를 log.txt에 남기는 주기(초). 계속 이어지는 기록을 남기고 싶으면 값을 줄이세요 |
+| `--log-file` | `log_ncnn.txt` | 위험도 산출 로그(세션 시작/종료, 확정 균열, 주기적 스냅샷 등)를 저장할 파일 경로 |
+| `--log-interval` | `5.0` | 새로 확정된 균열이 없어도 현재 위험도를 로그에 남기는 주기(초) |
 
 ---
 
@@ -122,9 +143,9 @@ python webcam_crack_test.py \
   직전 세션 대비 균열이 커지고 있다는 뜻(진행성 균열 의심, 우선 점검 필요)
 - 2번째 줄(오른쪽): 모든 구역을 종합한 건물 전체 위험도
 
-### log.txt 로그
+### log_ncnn.txt 로그
 
-같은 위험도 정보가 화면뿐 아니라 `--log-file`(기본 `log.txt`)에도 시간순으로 저장됩니다.
+같은 위험도 정보가 화면뿐 아니라 `--log-file`(기본 `log_ncnn.txt`)에도 시간순으로 저장됩니다.
 아래 이벤트들이 기록됩니다.
 
 | 이벤트 | 기록 시점 |
@@ -139,7 +160,7 @@ python webcam_crack_test.py \
 
 예시:
 ```
-2026-08-24 05:22:47 [INFO] Session started | session_id=20260824_052247_ab12cd zone=3F_복도 state_file=building_risk_state.json log_file=log.txt
+2026-08-24 05:22:47 [INFO] Session started | session_id=20260824_052247_ab12cd zone=3F_복도 state_file=building_risk_state.json log_file=log_ncnn.txt
 2026-08-24 05:22:52 [INFO] Confirmed crack | zone=3F_복도 track_id=a1b2c3d4 score=75 grade=D width_mm=1.42 width_px=4.73
 2026-08-24 05:22:57 [INFO] Snapshot | zone=3F_복도 frame_score=42.0 frame_grade=C cracks=2 zone_max=75(D) building_overall=61.5(D)
 ```
@@ -192,7 +213,7 @@ WIDTH_GRADE_MAX = ("E", 100)
 | 증상 | 원인/해결 |
 |---|---|
 | `카메라를 열 수 없습니다` 에러 | `--camera` 인덱스를 0,1,2로 바꿔가며 시도. 다른 프로그램이 웹캠을 점유 중인지 확인 |
-| 모델 로드 시 `unexpected keys` 경고 | `aux_classifier` 등 추론에 불필요한 키는 무시되도록 이미 처리되어 있어 정상 동작함 |
+| NCNN 모델을 열 수 없음 | `.ncnn.param`과 `.ncnn.bin`이 모두 `src/esw_seg_model_ncnn/`에 있는지 확인. Git LFS로 받은 `.bin`이 포인터 파일이면 `git lfs pull` 실행 |
 | 균열 폭 측정이 부정확함 | `scikit-image` 설치 여부 확인(`pip install scikit-image`) — 미설치 시 근사값 사용됨. 그래도 부정확하면 `--mm-per-pixel` 보정 여부 확인 |
 | 위험도가 매 프레임 계속 올라감 | `--state-file`은 "구역의 최댓값"을 저장하는 것이라 이미 최댓값을 넘지 않는 한 더 오르지 않음. 계속 오른다면 실제로 더 큰/새로운 균열이 잡히고 있는 것 |
 | `state-file`을 초기화하고 싶음 | 해당 JSON 파일을 삭제하고 다시 실행하면 새로 시작됨 |
