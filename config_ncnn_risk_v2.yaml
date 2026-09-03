@@ -1,0 +1,113 @@
+# V2: 160x160 NCNN localization + original-frame ROI measurement + crack grouping
+camera:
+  source: "picam"
+  width: 640
+  height: 480
+  frame_skip: 2
+
+ncnn_model:
+  param_path: "models/esw_seg_ncnn/crackseg.ncnn.param"
+  bin_path: "models/esw_seg_ncnn/crackseg.ncnn.bin"
+  input_blob: "in0"
+  output_blob: "out0"
+  input_width: 160
+  input_height: 160
+  num_threads: 4
+  use_fp16_storage: true
+  use_fp16_packed: true
+  use_fp16_arithmetic: false
+  output_is_logits: true
+  probability_threshold: 0.50
+
+calibration:
+  ready: false
+  mm_per_px: 0.050
+
+measurement:
+  # ----- 160x160 mask cleanup/grouping -----
+  # Bridge very small gaps before component extraction.
+  model_close_kernel: 3
+  model_close_iterations: 1
+
+  # Remove tiny model-mask speckles before they become "cracks".
+  min_model_component_area_px: 3
+
+  # Nearby fragments can be treated as one physical crack.
+  # 3 model pixels ~= 12 original x-pixels at 640/160.
+  group_merge_gap_model_px: 3.0
+  group_merge_angle_deg: 35.0
+  # A tiny fragment near a larger crack may merge even if its PCA angle is noisy.
+  group_merge_small_fragment_area_px: 12
+
+  # ----- Original 640x480 ROI refinement -----
+  # Only these ROIs are processed at original resolution.
+  roi_margin_model_px: 3
+  guide_dilate_px: 5
+  refine_background_sigma: 3.0
+  refine_darkness_percentile: 65.0
+  refine_min_darkness: 5.0
+  refine_close_kernel: 3
+  min_refined_component_area_px: 12
+  min_refined_total_area_px: 18
+
+  # Final measurement/noise filter.
+  min_measured_length_px: 12.0
+  width_percentile: 95
+
+  # Orientation / branching.
+  orientation_horizontal_deg: 22.5
+  orientation_vertical_deg: 67.5
+  # Branching now uses true skeleton branchpoints, NOT endpoint count.
+  branch_min_branchpoints: 1
+
+risk_scoring:
+  weights:
+    width: 0.65
+    length: 0.20
+    orientation: 0.15
+  width_tiers_mm:
+    hairline: 0.10
+    action: 0.30
+    high: 0.50
+    critical: 1.00
+  length_reference_mm: 200.0
+  orientation_weight:
+    vertical: 0.35
+    horizontal: 0.55
+    diagonal: 0.75
+    branching: 1.00
+  frame_score_combo:
+    max_w: 0.70
+    mean_w: 0.15
+    coverage_w: 0.15
+  coverage_reference_ratio: 0.03
+
+temporal_smoothing:
+  ema_alpha: 0.30
+  history_len: 15
+  hysteresis:
+    down_margin: 8
+
+levels:
+  safe_max: 25
+  caution_max: 50
+  danger_max: 75
+
+spray_policy:
+  min_width_mm: 0.30
+  trigger_level: "위험"
+
+pump:
+  enabled: true
+  dry_run: true
+  pin_in3: 17
+  pin_in4: 27
+  duration_sec: 2.0
+  cooldown_sec: 5.0
+  required_consecutive_analyzed_frames: 2
+
+alert:
+  enabled: true
+  trigger_level: "위험"
+  save_dir: "alerts"
+  cooldown_sec: 10
