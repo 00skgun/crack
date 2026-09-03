@@ -1,0 +1,101 @@
+# ==========================================================
+# NCNN segmentation + mm-based crack risk + pump config
+# ==========================================================
+
+camera:
+  source: "picam"       # picam, 0, image/video path
+  width: 640
+  height: 480
+  frame_skip: 2         # DeepLabV3-ResNet101 is heavy on Pi 4B; try 3 or 4 if slow
+
+ncnn_model:
+  param_path: "models/esw_seg_ncnn/crackseg.ncnn.param"
+  bin_path: "models/esw_seg_ncnn/crackseg.ncnn.bin"
+  input_blob: "in0"
+  output_blob: "out0"
+  input_width: 256
+  input_height: 256
+  num_threads: 4
+
+  # torchvision DeepLabV3 returns logits. sigmoid(logit) >= 0.5 is the standard binary decision.
+  output_is_logits: true
+  probability_threshold: 0.50
+
+# Fixed-distance camera calibration.
+# IMPORTANT: measure this value at the exact camera-wall distance used by the hardware spacer.
+calibration:
+  ready: false          # set true ONLY after mm_per_px is actually measured
+  mm_per_px: 0.050      # placeholder preview value; MUST be replaced with your measured value
+
+measurement:
+  min_component_area_px: 20
+  width_percentile: 95
+  branch_min_endpoints: 4
+  orientation_horizontal_deg: 22.5
+  orientation_vertical_deg: 67.5
+  # Optional mask cleanup. Keep kernels small because cracks are thin.
+  close_kernel: 3
+  close_iterations: 1
+
+risk_scoring:
+  # Agreed policy: physical crack width is primary, length/orientation are secondary.
+  weights:
+    width: 0.65
+    length: 0.20
+    orientation: 0.15
+
+  # Prototype action / inspection tiers. 0.3 mm is NOT a collapse threshold.
+  width_tiers_mm:
+    hairline: 0.10
+    action: 0.30
+    high: 0.50
+    critical: 1.00
+
+  # Length reaches maximum contribution at this reference length.
+  length_reference_mm: 200.0
+
+  # Orientation is only a small heuristic contribution.
+  orientation_weight:
+    vertical: 0.35
+    horizontal: 0.55
+    diagonal: 0.75
+    branching: 1.00
+
+  # Frame score = 70% worst crack + 15% average + 15% crack coverage/density proxy.
+  frame_score_combo:
+    max_w: 0.70
+    mean_w: 0.15
+    coverage_w: 0.15
+
+  # Coverage score saturates when segmented crack area reaches this image fraction.
+  coverage_reference_ratio: 0.03
+
+temporal_smoothing:
+  ema_alpha: 0.30
+  history_len: 15
+  hysteresis:
+    down_margin: 8
+
+levels:
+  safe_max: 25
+  caution_max: 50
+  danger_max: 75
+
+spray_policy:
+  min_width_mm: 0.30
+  trigger_level: "위험"   # 위험 or 심각 only
+
+pump:
+  enabled: true
+  dry_run: true           # FIRST TEST: keep true. Change to false after calibration + verification.
+  pin_in3: 17
+  pin_in4: 27
+  duration_sec: 2.0
+  cooldown_sec: 5.0
+  required_consecutive_analyzed_frames: 2
+
+alert:
+  enabled: true
+  trigger_level: "위험"
+  save_dir: "alerts"
+  cooldown_sec: 10
